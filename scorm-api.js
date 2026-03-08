@@ -1,6 +1,9 @@
-// SCORM API — powered by scorm-again
-// https://github.com/jcputney/scorm-again
+// ══════════════════════════════════════════════════════
+//  SCORM API — powered by scorm-again library
+//  Docs: https://github.com/jcputney/scorm-again
+// ══════════════════════════════════════════════════════
 
+// Load scorm-again from CDN
 var scormAgainScript = document.createElement("script");
 scormAgainScript.src = "https://cdn.jsdelivr.net/npm/scorm-again@latest/dist/scorm-again.js";
 scormAgainScript.onload = function () {
@@ -18,9 +21,13 @@ function initSCORM() {
     },
   };
 
-  var scorm12   = new Scorm12API(settings);
+  // SCORM 1.2
+  var scorm12 = new Scorm12API(settings);
+
+  // SCORM 2004
   var scorm2004 = new Scorm2004API(settings);
 
+  // لما الكورس يبعت data — بنحدث الـ UI
   scorm12.on("LMSSetValue.cmi.core.score.raw",       function (v) { updateUI("score",    v); });
   scorm12.on("LMSSetValue.cmi.core.lesson_status",   function (v) { updateUI("status",   v); });
   scorm12.on("LMSSetValue.cmi.core.lesson_location", function (v) { updateUI("location", v); });
@@ -33,17 +40,9 @@ function initSCORM() {
   window.API         = scorm12;
   window.API_1484_11 = scorm2004;
 
+  // inject into iframe
   var frame = document.getElementById("scorm-frame");
   if (frame) {
-    // inject now if iframe already loaded
-    try {
-      if (frame.contentWindow && frame.contentDocument) {
-        frame.contentWindow.API         = window.API;
-        frame.contentWindow.API_1484_11 = window.API_1484_11;
-      }
-    } catch (e) {}
-
-    // inject again on every load
     frame.addEventListener("load", function () {
       try {
         frame.contentWindow.API         = window.API;
@@ -53,6 +52,7 @@ function initSCORM() {
   }
 }
 
+// تحديث الـ UI
 function updateUI(key, value) {
   var scoreEl  = document.getElementById("score");
   var statusEl = document.getElementById("status");
@@ -73,34 +73,19 @@ function updateUI(key, value) {
 }
 
 window.getSCORMReport = function () {
-  var api12   = window.API;
-  var api2004 = window.API_1484_11;
-  if (!api12 && !api2004) return {};
-
-  // Try SCORM 1.2 first, fallback to SCORM 2004
-  var score     = (api12   && api12.LMSGetValue("cmi.core.score.raw"))       ||
-                  (api2004 && api2004.GetValue("cmi.score.raw"))              || "–";
-
-  var status    = (api12   && api12.LMSGetValue("cmi.core.lesson_status"))   ||
-                  (api2004 && api2004.GetValue("cmi.completion_status"))      ||
-                  (api2004 && api2004.GetValue("cmi.success_status"))         || "–";
-
-  var lastSlide = (api12   && api12.LMSGetValue("cmi.core.lesson_location")) ||
-                  (api2004 && api2004.GetValue("cmi.location"))               || "–";
+  var api = window.API;
+  if (!api) return {};
 
   var interactions = [];
-  var api = api12 || api2004;
-  var isScorm12 = !!api12;
-  var count = parseInt((api.cmi && api.cmi.interactions && api.cmi.interactions._count) || "0");
+  var count = parseInt(api.cmi.interactions._count || "0");
 
   for (var i = 0; i < count; i++) {
     var base = "cmi.interactions." + i + ".";
-    var getValue = isScorm12 ? api.LMSGetValue.bind(api) : api.GetValue.bind(api);
     interactions.push({
-      question      : getValue(base + "id")                          || ("Question " + (i + 1)),
-      result        : getValue(base + "result")                      || "–",
-      studentAnswer : getValue(base + "student_response")            || "–",
-      correctAnswer : getValue(base + "correct_responses.0.pattern") || "–",
+      question      : api.LMSGetValue(base + "id")                           || ("Question " + (i + 1)),
+      result        : api.LMSGetValue(base + "result")                       || "–",
+      studentAnswer : api.LMSGetValue(base + "student_response")             || "–",
+      correctAnswer : api.LMSGetValue(base + "correct_responses.0.pattern")  || "–",
     });
   }
 
@@ -108,9 +93,9 @@ window.getSCORMReport = function () {
   var wrong   = interactions.filter(function (x) { return x.result === "wrong" || x.result === "incorrect"; }).length;
 
   return {
-    score          : score,
-    status         : status,
-    lastSlide      : lastSlide,
+    score          : api.LMSGetValue("cmi.core.score.raw")       || "–",
+    status         : api.LMSGetValue("cmi.core.lesson_status")   || "–",
+    lastSlide      : api.LMSGetValue("cmi.core.lesson_location") || "–",
     totalQuestions : interactions.length,
     correct        : correct,
     wrong          : wrong,
