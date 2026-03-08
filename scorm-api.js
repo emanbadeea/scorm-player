@@ -1,141 +1,95 @@
-// SCORM 1.2 Runtime
+// SCORM API — powered by scorm-again
+// https://github.com/jcputney/scorm-again
 
-var scormData = {
-  "cmi.core.lesson_status"  : "",
-  "cmi.core.score.raw"      : "",
-  "cmi.core.lesson_location": "",
-  "cmi.interactions._count" : "0",
+var scormAgainScript = document.createElement("script");
+scormAgainScript.src = "https://cdn.jsdelivr.net/npm/scorm-again@latest/dist/scorm-again.js";
+scormAgainScript.onload = function () {
+  initSCORM();
 };
+document.head.appendChild(scormAgainScript);
 
-// interactions 
-var interactions = [];
+function initSCORM() {
 
+  var settings = {
+    autocommit: true,
+    autocommitSeconds: 10,
+    onLogMessage: function (level, msg) {
+      console.log("[SCORM]", level, msg);
+    },
+  };
 
-function parseInteractionKey(key) {
-  var match = key.match(/^cmi\.interactions\.(\d+)\.(.+)$/);
-  if (!match) return null;
-  return { index: parseInt(match[1]), field: match[2] };
+  var scorm12   = new Scorm12API(settings);
+  var scorm2004 = new Scorm2004API(settings);
+
+  scorm12.on("LMSSetValue.cmi.core.score.raw",       function (v) { updateUI("score",    v); });
+  scorm12.on("LMSSetValue.cmi.core.lesson_status",   function (v) { updateUI("status",   v); });
+  scorm12.on("LMSSetValue.cmi.core.lesson_location", function (v) { updateUI("location", v); });
+
+  scorm2004.on("SetValue.cmi.score.raw",             function (v) { updateUI("score",    v); });
+  scorm2004.on("SetValue.cmi.completion_status",     function (v) { updateUI("status",   v); });
+  scorm2004.on("SetValue.cmi.success_status",        function (v) { updateUI("status",   v); });
+  scorm2004.on("SetValue.cmi.location",              function (v) { updateUI("location", v); });
+
+  window.API         = scorm12;
+  window.API_1484_11 = scorm2004;
+
+  var frame = document.getElementById("scorm-frame");
+  if (frame) {
+    frame.addEventListener("load", function () {
+      try {
+        frame.contentWindow.API         = window.API;
+        frame.contentWindow.API_1484_11 = window.API_1484_11;
+      } catch (e) {}
+    });
+  }
 }
 
-// ── updateUI ──
 function updateUI(key, value) {
   var scoreEl  = document.getElementById("score");
   var statusEl = document.getElementById("status");
   var badge    = document.getElementById("status-badge");
 
-  if (key === "cmi.core.score.raw" && scoreEl) {
+  if (key === "score" && scoreEl) {
     scoreEl.innerText = value || "–";
   }
 
-  if (key === "cmi.core.lesson_status" && statusEl) {
+  if (key === "status" && statusEl) {
     statusEl.innerText = value || "–";
     if (badge) {
       badge.className = "badge";
       if (value === "passed" || value === "completed") badge.classList.add("completed");
-      if (value === "failed") badge.classList.add("failed");
+      if (value === "failed")                          badge.classList.add("failed");
     }
   }
 }
-
-// ── LMSSetValue──
-function handleSetValue(key, val) {
-  scormData[key] = val;
-  updateUI(key, val);
-
-
-  var parsed = parseInteractionKey(key);
-  if (parsed) {
-    var i = parsed.index;
-    if (!interactions[i]) interactions[i] = {};
-    interactions[i][parsed.field] = val;
-
-
-    scormData["cmi.interactions._count"] = String(interactions.length);
-  }
-
-  return "true";
-}
-
-
-function handleGetValue(key) {
-
-  var parsed = parseInteractionKey(key);
-  if (parsed) {
-    var interaction = interactions[parsed.index];
-    if (interaction && interaction[parsed.field] !== undefined) {
-      return interaction[parsed.field];
-    }
-    return "";
-  }
-  return scormData[key] !== undefined ? scormData[key] : "";
-}
-
 
 window.getSCORMReport = function () {
-  var correct = 0;
-  var wrong   = 0;
-  var details = [];
+  var api = window.API;
+  if (!api) return {};
 
-  interactions.forEach(function (item, idx) {
-    var result = (item.result || "").toLowerCase();
-    if (result === "correct")   correct++;
-    if (result === "wrong" || result === "incorrect") wrong++;
+  var interactions = [];
+  var count = parseInt(api.cmi.interactions._count || "0");
 
-    details.push({
-      question        : item.id || ("Question " + (idx + 1)),
-      result          : item.result || "–",
-      studentAnswer   : item.student_response || "–",
-      correctAnswer   : (item["correct_responses.0.pattern"]) || "–",
+  for (var i = 0; i < count; i++) {
+    var base = "cmi.interactions." + i + ".";
+    interactions.push({
+      question      : api.LMSGetValue(base + "id")                          || ("Question " + (i + 1)),
+      result        : api.LMSGetValue(base + "result")                      || "–",
+      studentAnswer : api.LMSGetValue(base + "student_response")            || "–",
+      correctAnswer : api.LMSGetValue(base + "correct_responses.0.pattern") || "–",
     });
-  });
+  }
+
+  var correct = interactions.filter(function (x) { return x.result === "correct"; }).length;
+  var wrong   = interactions.filter(function (x) { return x.result === "wrong" || x.result === "incorrect"; }).length;
 
   return {
-    score          : scormData["cmi.core.score.raw"]       || "–",
-    status         : scormData["cmi.core.lesson_status"]   || "–",
-    lastSlide      : scormData["cmi.core.lesson_location"] || "–",
+    score          : api.LMSGetValue("cmi.core.score.raw")       || "–",
+    status         : api.LMSGetValue("cmi.core.lesson_status")   || "–",
+    lastSlide      : api.LMSGetValue("cmi.core.lesson_location") || "–",
     totalQuestions : interactions.length,
     correct        : correct,
     wrong          : wrong,
-    interactions   : details,
+    interactions   : interactions,
   };
 };
-
-// ══════════════════════════════════════
-// SCORM 1.2 API
-// ══════════════════════════════════════
-window.API = {
-  LMSInitialize : function ()         { return "true"; },
-  LMSFinish     : function ()         { return "true"; },
-  LMSGetValue   : function (key)      { return handleGetValue(key); },
-  LMSSetValue   : function (key, val) { return handleSetValue(key, val); },
-  LMSCommit     : function ()         { return "true"; },
-  LMSGetLastError   : function () { return "0"; },
-  LMSGetErrorString : function () { return ""; },
-  LMSGetDiagnostic  : function () { return ""; },
-};
-
-// ══════════════════════════════════════
-// SCORM 2004 API
-// ══════════════════════════════════════
-window.API_1484_11 = {
-  Initialize  : function ()         { return "true"; },
-  Terminate   : function ()         { return "true"; },
-  GetValue    : function (key)      { return handleGetValue(key); },
-  SetValue    : function (key, val) { return handleSetValue(key, val); },
-  Commit      : function ()         { return "true"; },
-  GetLastError    : function () { return "0"; },
-  GetErrorString  : function () { return ""; },
-  GetDiagnostic   : function () { return ""; },
-};
-
-// ── inject API into iframe ──
-window.addEventListener("load", function () {
-  var frame = document.getElementById("scorm-frame");
-  if (!frame) return;
-  frame.addEventListener("load", function () {
-    try {
-      frame.contentWindow.API         = window.API;
-      frame.contentWindow.API_1484_11 = window.API_1484_11;
-    } catch (e) {}
-  });
-});
