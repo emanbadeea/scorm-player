@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest identifier="MANIFEST-1772290588290-9952" version="1" xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2" xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_rootv1p2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.imsproject.org/xsd/imscp_rootv1p1p2 imscp_rootv1p1p2.xsd">
+  <metadata>
+    <schema>ADL SCORM</schema>
+    <schemaversion>1.2</schemaversion>
+  </metadata>
+  <organizations default="ORG-1772290588290-491">
+    <organization identifier="ORG-1772290588290-491">
+      <title>English test</title>
+      <item identifier="ITEM-1772290588290-1323" identifierref="RESOURCE-1772290588290-1696">
+        <title>English test</title>
+        <adlcp:masteryscore>60</adlcp:masteryscore>
+      </item>
+    </organization>
+  </organizations>
+  <resources>
+    <resource identifier="RESOURCE-1772290588290-1696" type="webcontent" href="index.html" adlcp:scormtype="sco">
+      <file href="index.html"/>
+      <file href="assets/index.css"/>
+      <file href="assets/index.js"/>
+      <file href="assets/vendor.js"/>
+    </resource>
+  </resources>
+</manifest>

@@ -1,0 +1,1862 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Favicon omitted for LMS compatibility - external URLs can trigger security filters -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- This will be replaced with actual total slides count during build -->
+    <meta name="total-slides" content="2" />
+    <!-- SCORM version indicator for runtime detection - will be replaced during export -->
+    <meta name="scorm-version" content="1.2" />
+    <title>English test</title>
+
+    <!-- SCORM API Wrapper - Commented out to prevent conflicts with inline implementation -->
+    <!-- <script src="./scorm_api_wrapper.js"></script> -->
+    <script>
+      // Expose a global function to create the SCORM wrapper
+      // This allows the framework to create the wrapper when it finds the API
+      window.createSCORMWrapper = function (api) {
+        if (!api) {
+          console.error("Cannot create SCORM wrapper: No API provided");
+          return null;
+        }
+
+        console.log("Creating SCORM wrapper for API", typeof api);
+
+        // Get SCORM version from meta tag (injected during export process)
+        const manifestMeta = document.querySelector(
+          'meta[name="scorm-version"]'
+        );
+        
+        // Version detection priority:
+        // 1. Use meta tag value if it's been replaced (not the placeholder)
+        // 2. Fall back to API method detection
+        let version;
+        if (manifestMeta && manifestMeta.content && 
+            manifestMeta.content !== "1.2" &&
+            (manifestMeta.content === "2004" || manifestMeta.content === "1.2")) {
+          version = manifestMeta.content;
+          console.log("🔍 HTML Template - Using meta tag SCORM version:", version);
+        } else {
+          // Detect from API: SCORM 2004 uses Initialize, SCORM 1.2 uses LMSInitialize
+          version = typeof api.Initialize === "function" ? "2004" : "1.2";
+          console.log("🔍 HTML Template - Detected SCORM version from API:", version);
+        }
+        
+        console.log(
+          "🔍 HTML Template - API methods available:",
+          typeof api.Initialize === "function" ? "2004 API (Initialize)" : "1.2 API (LMSInitialize)"
+        );
+
+        var wrapper = {
+          version: version,
+          API: api,
+          startTime: new Date().getTime(), // Track start time for session duration
+
+          // Core methods - use detected API methods regardless of package version
+          initialize: function () {
+            if (this._isInitialized) {
+              console.log(
+                "⚠️ HTML Template SCORM already initialized, skipping"
+              );
+              return true;
+            }
+
+            let result;
+            if (typeof api.Initialize === "function") {
+              result = api.Initialize("");
+            } else {
+              result = api.LMSInitialize("");
+            }
+
+            if (result === "true" || result === true) {
+              this._isInitialized = true;
+              console.log("✅ HTML Template SCORM initialized successfully");
+            }
+
+            return result;
+          },
+
+          terminate: function () {
+            // CRITICAL for SCORM 2004: Set cmi.exit to "suspend" to persist suspend_data
+            // Without this, the LMS will not save suspend_data for the next session
+            if (version === "2004") {
+              try {
+                const exitResult = this.setValue("cmi.exit", "suspend");
+                
+                
+                // Verify the value was set
+                const verifyExit = this.getValue("cmi.exit");
+
+                
+                const commitResult = this.commit();
+
+              } catch (exitError) {
+                console.error("❌ Error setting cmi.exit:", exitError);
+              }
+
+              return api.Terminate("");
+            } else {
+
+              return api.LMSFinish("");
+            }
+          },
+
+          getValue: function (key) {
+            if (typeof api.Initialize === "function") {
+              return api.GetValue(key);
+            } else {
+              return api.LMSGetValue(key);
+            }
+          },
+
+          setValue: function (key, value) {
+            if (typeof api.Initialize === "function") {
+              return api.SetValue(key, value);
+            } else {
+              return api.LMSSetValue(key, value);
+            }
+          },
+
+          commit: function () {
+            if (typeof api.Initialize === "function") {
+              return api.Commit("");
+            } else {
+              return api.LMSCommit("");
+            }
+          },
+
+          getLastError: function () {
+            if (typeof api.Initialize === "function") {
+              return api.GetLastError();
+            } else {
+              return api.LMSGetLastError();
+            }
+          },
+
+          getErrorString: function (errorCode) {
+            if (typeof api.Initialize === "function") {
+              return api.GetErrorString(errorCode);
+            } else {
+              return api.LMSGetErrorString(errorCode);
+            }
+          },
+
+          getDiagnostic: function (errorCode) {
+            if (typeof api.Initialize === "function") {
+              return api.GetDiagnostic(errorCode);
+            } else {
+              return api.LMSGetDiagnostic(errorCode);
+            }
+          },
+
+          // Helper function to safely parse suspend_data
+          parseSuspendData: function (suspendDataStr) {
+            if (!suspendDataStr) return {};
+
+            try {
+              return JSON.parse(suspendDataStr);
+            } catch (e) {
+              console.error("Error parsing suspend_data:", e);
+              return {};
+            }
+          },
+
+          // Helper function to merge new data with existing suspend_data
+          mergeSuspendData: function (existingData, newData) {
+            try {
+              const parsedExisting =
+                typeof existingData === "string"
+                  ? this.parseSuspendData(existingData)
+                  : existingData || {};
+
+              // Create a deep merge (not just shallow properties)
+              const merged = { ...parsedExisting };
+
+              // Merge top-level properties
+              for (const key in newData) {
+                // Special handling for objects that need deep merging
+                if (
+                  key === "quiz" &&
+                  typeof newData[key] === "object" &&
+                  typeof merged[key] === "object"
+                ) {
+                  merged[key] = { ...merged[key], ...newData[key] };
+                } else if (
+                  key === "completedSlides" &&
+                  typeof newData[key] === "object" &&
+                  typeof merged[key] === "object"
+                ) {
+                  merged[key] = { ...merged[key], ...newData[key] };
+                } else if (
+                  key === "progress" &&
+                  typeof newData[key] === "object" &&
+                  typeof merged[key] === "object"
+                ) {
+                  merged[key] = {
+                    ...merged[key],
+                    ...newData[key],
+                    // Special handling for completedSlides - preserve array format
+                    completedSlides: Array.isArray(newData[key].completedSlides)
+                      ? newData[key].completedSlides
+                      : Array.isArray(merged[key].completedSlides)
+                        ? merged[key].completedSlides
+                        : [],
+                  };
+                } else {
+                  // For non-object properties or other objects, just replace
+                  merged[key] = newData[key];
+                }
+              }
+
+              return JSON.stringify(merged);
+            } catch (e) {
+              console.error("Error merging suspend_data:", e);
+              // If merge fails, just use the new data
+              return JSON.stringify(newData);
+            }
+          },
+
+          // Standard implementation of recordSlideView
+          recordSlideView: function (index) {
+            try {
+              console.log("Recording slide view for index:", index);
+
+              // Get the suspend_data key based on SCORM version
+              const suspendDataKey =
+                version === "2004"
+                  ? "cmi.suspend_data"
+                  : "cmi.core.suspend_data";
+              const locationKey =
+                version === "2004"
+                  ? "cmi.location"
+                  : "cmi.core.lesson_location";
+
+              // Prepare location data
+              const locationData = {
+                slide: index,
+                id: "slide-" + index,
+              };
+
+              // Update the location
+              this.setValue(locationKey, JSON.stringify(locationData));
+
+              // Get current suspend_data
+              const currentSuspendData = this.getValue(suspendDataKey);
+
+              // Parse the current suspend_data or create empty object if none exists
+              const parsedData = this.parseSuspendData(currentSuspendData);
+
+              // Update slide position
+              parsedData.slide = index;
+              parsedData.lastSlide = Math.max(index, parsedData.lastSlide || 0);
+
+              // Update completed slides (array format)
+              if (!parsedData.completedSlides) parsedData.completedSlides = [];
+              if (!parsedData.completedSlides.includes(index))
+                parsedData.completedSlides.push(index);
+
+              // Update progress tracking (array format)
+              if (!parsedData.progress) parsedData.progress = {};
+              if (!parsedData.progress.completedSlides)
+                parsedData.progress.completedSlides = [];
+              if (!parsedData.progress.completedSlides.includes(index))
+                parsedData.progress.completedSlides.push(index);
+              parsedData.progress.slide = index;
+
+              // Add timestamp
+              parsedData.timestamp = new Date().toISOString();
+
+              // Save the updated suspend_data
+              this.setValue(suspendDataKey, JSON.stringify(parsedData));
+
+              // Commit the changes
+              this.commit();
+
+              return true;
+            } catch (e) {
+              console.error("Error recording slide view:", e);
+              return false;
+            }
+          },
+
+          // Standard implementation of saveSession
+          saveSession: function () {
+            console.log("Saving SCORM session");
+
+            try {
+              // Get the suspend_data key based on SCORM version
+              const suspendDataKey =
+                version === "2004"
+                  ? "cmi.suspend_data"
+                  : "cmi.core.suspend_data";
+
+              // Calculate session time
+              if (this.startTime) {
+                let sessionTime;
+
+                // Calculate session time
+                const currentTime = new Date().getTime();
+                const elapsedSeconds = Math.floor(
+                  (currentTime - this.startTime) / 1000
+                );
+                const hours = Math.floor(elapsedSeconds / 3600);
+                const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+                const seconds = elapsedSeconds % 60;
+
+                // Format the time string based on SCORM version
+                if (version === "1.2") {
+                  // SCORM 1.2 format: HH:MM:SS
+                  sessionTime = [
+                    hours.toString().padStart(2, "0"),
+                    minutes.toString().padStart(2, "0"),
+                    seconds.toString().padStart(2, "0"),
+                  ].join(":");
+
+                  this.setValue("cmi.core.session_time", sessionTime);
+                } else {
+                  // SCORM 2004 format: PT#H#M#S
+                  sessionTime =
+                    "PT" + hours + "H" + minutes + "M" + seconds + "S";
+                  this.setValue("cmi.session_time", sessionTime);
+                }
+              }
+
+              // Get the current suspend_data
+              const currentSuspendData = this.getValue(suspendDataKey);
+
+              // If there's current suspend_data, ensure we preserve any critical info
+              // that might not be tracked in our main data object
+              if (currentSuspendData) {
+                const parsedData = this.parseSuspendData(currentSuspendData);
+
+                // Update the timestamp
+                parsedData.timestamp = new Date().toISOString();
+
+                // Save the updated suspend_data
+                this.setValue(suspendDataKey, JSON.stringify(parsedData));
+              }
+
+              // Commit the data
+              this.commit();
+
+              return true;
+            } catch (e) {
+              console.error("Error saving session:", e);
+              return false;
+            }
+          },
+
+          setScore: function (score) {
+            console.log(
+              "🎯 setScore called with score:",
+              score,
+              "version:",
+              version
+            );
+
+            if (!this.API) {
+              console.error("Cannot set score: SCORM API not available");
+              return false;
+            }
+
+            try {
+              if (version === "1.2") {
+                // SCORM 1.2 score elements
+                console.log("🎯 Setting SCORM 1.2 score fields");
+                this.setValue("cmi.core.score.raw", score.toString());
+                this.setValue("cmi.core.score.min", "0");
+                this.setValue("cmi.core.score.max", "100");
+
+                // Verify the values were set
+                console.log(
+                  "🔍 Verification - SCORM 1.2 fields after setScore:"
+                );
+                console.log(
+                  "  cmi.core.score.raw:",
+                  this.getValue("cmi.core.score.raw")
+                );
+                console.log(
+                  "  cmi.core.score.min:",
+                  this.getValue("cmi.core.score.min")
+                );
+                console.log(
+                  "  cmi.core.score.max:",
+                  this.getValue("cmi.core.score.max")
+                );
+                return true;
+              } else {
+                // SCORM 2004 score elements
+                console.log("🎯 Setting SCORM 2004 score fields");
+                this.setValue("cmi.score.raw", score.toString());
+                this.setValue("cmi.score.scaled", (score / 100).toString());
+                this.setValue("cmi.score.min", "0");
+                this.setValue("cmi.score.max", "100");
+
+                // Verify the values were set
+                console.log(
+                  "🔍 Verification - SCORM 2004 fields after setScore:"
+                );
+                console.log("  cmi.score.raw:", this.getValue("cmi.score.raw"));
+                console.log(
+                  "  cmi.score.scaled:",
+                  this.getValue("cmi.score.scaled")
+                );
+                console.log("  cmi.score.min:", this.getValue("cmi.score.min"));
+                console.log("  cmi.score.max:", this.getValue("cmi.score.max"));
+                return true;
+              }
+            } catch (e) {
+              console.error("Error setting SCORM score:", e);
+              return false;
+            }
+          },
+
+          setComplete: function () {
+            if (version === "2004") {
+              this.setValue("cmi.completion_status", "completed");
+              return true;
+            } else {
+              this.setValue("cmi.core.lesson_status", "completed");
+              return true;
+            }
+          },
+
+          getVersion: function () {
+            return version;
+          },
+        };
+
+        // Return the wrapper
+        return wrapper;
+      };
+    </script>
+    <!-- Global SCORM helpers for shared components -->
+    <script>
+      window.scormHelpers = {
+        // These will be replaced at runtime with the actual implementations
+        callScormAPI: function () {
+          return window.SCORM_WRAPPER
+            ? window.SCORM_WRAPPER.callAPI.apply(
+                window.SCORM_WRAPPER,
+                arguments
+              )
+            : null;
+        },
+        updateScormInteraction: function () {
+          return window.updateScormInteraction
+            ? window.updateScormInteraction.apply(null, arguments)
+            : null;
+        },
+        getFullSuspendData: function () {
+          if (window.getFullSuspendData) return window.getFullSuspendData();
+          return { quiz: {} };
+        },
+        setFullSuspendData: function (data) {
+          if (window.setFullSuspendData) return window.setFullSuspendData(data);
+          console.log("Stub setFullSuspendData called", data);
+        },
+      };
+    </script>
+    <script type="text/javascript">
+// Course data injected during build
+window.COURSE_DATA = {
+  "id": "876e160b-0be9-4e0b-a79e-1b466dfa9e85",
+  "title": "English test",
+  "description": "",
+  "cover_image": "media/image_pic.png",
+  "slides": [
+    {
+      "id": "ad6654a6-7aee-4964-88d9-50b4582acbca",
+      "title": "Introduction",
+      "content": {},
+      "duration": 0,
+      "course_id": "876e160b-0be9-4e0b-a79e-1b466dfa9e85",
+      "created_at": "2026-02-28T14:46:04.831768+00:00",
+      "objectives": [],
+      "section_id": null,
+      "slide_type": "content",
+      "updated_at": "2026-02-28T14:46:04.831768+00:00",
+      "order_index": 0,
+      "variant_ids": null,
+      "blocks": [
+        {
+          "originalId": "2712b2c5-347e-4f7d-9e27-062660597a77",
+          "type": "slide_intro",
+          "variant": "default",
+          "content": {
+            "icon": "academic-cap",
+            "title": "Welcome to English test!",
+            "format": {
+              "gap": 24,
+              "width": 100,
+              "textAlign": "start",
+              "textColor": "var(--background)",
+              "paddingTop": 48,
+              "showLesson": true,
+              "accentColor": "",
+              "paddingBottom": 48,
+              "paddingLinked": true,
+              "backgroundSize": "cover",
+              "backgroundType": "IMAGE",
+              "showObjectives": true,
+              "backgroundColor": "",
+              "contentMaxWidth": 3,
+              "backgroundEffect": "parallax",
+              "backgroundRepeat": "no-repeat",
+              "backgroundImageAlt": "Aubergine gradient background",
+              "backgroundImageSrc": "media/bg_gradient_2.svg",
+              "backgroundPosition": "center",
+              "baseBackgroundType": "LIGHT",
+              "showTableOfContent": false,
+              "baseBackgroundColor": ""
+            },
+            "duration": 300,
+            "subtitle": "Let's get started on this learning journey",
+            "objectives": [
+              {
+                "icon": "👍",
+                "text": "Learn the basics of Scormstack"
+              },
+              {
+                "icon": "😘",
+                "text": "See how easy it is to create awesome content"
+              }
+            ],
+            "description": "This is your first slide. Click on any element to customize it and make it your own!"
+          },
+          "custom_layout_id": null,
+          "position": 0,
+          "id": "b0"
+        },
+        {
+          "originalId": "d5898b13-e47a-4d68-82a5-a2740617dcee",
+          "type": "separator",
+          "variant": "shape",
+          "content": {
+            "shape": "diagonal",
+            "format": {
+              "gap": 24,
+              "width": 100,
+              "textAlign": "start",
+              "textColor": "",
+              "paddingTop": 0,
+              "accentColor": "",
+              "paddingBottom": 0,
+              "paddingLinked": true,
+              "backgroundType": "LIGHT",
+              "backgroundColor": "",
+              "contentMaxWidth": 3
+            },
+            "rotate": false,
+            "options": {
+              "width": 100,
+              "opacity": 100,
+              "thickness": 10,
+              "top_color": "var(--background)"
+            },
+            "topColor": "var(--background)",
+            "flip_vertical": true,
+            "flip_horizontal": true,
+            "extend_background": true
+          },
+          "custom_layout_id": null,
+          "position": 1,
+          "id": "b1"
+        },
+        {
+          "originalId": "5e1f71f0-6de8-4ebb-b5f6-8da7e2800640",
+          "type": "image",
+          "variant": "image_with_text",
+          "content": {
+            "text": "<p>Images make your content more <strong>engaging</strong> and help learners <em>remember</em> key concepts. You can add images alongside text, adjust their position, and customize the layout to match your teaching style.</p><p>💡 <strong>Tip:</strong> Click on this block to customize the image, text, and layout!</p>",
+            "format": {
+              "gap": 24,
+              "width": 100,
+              "textAlign": "start",
+              "paddingTop": 32,
+              "accentColor": "",
+              "paddingBottom": 32,
+              "paddingLinked": true,
+              "backgroundType": "LIGHT",
+              "backgroundColor": "",
+              "contentMaxWidth": 3
+            },
+            "images": {
+              "image_1": {
+                "alt": "Learning illustration",
+                "src": "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&q=80",
+                "width": 50,
+                "caption": "Visual learning enhances retention",
+                "position": "left",
+                "verticalAlign": "top"
+              }
+            },
+            "options": {
+              "box_shadow": true,
+              "grid_columns": 3,
+              "show_caption": true
+            }
+          },
+          "custom_layout_id": null,
+          "position": 2,
+          "id": "b2"
+        },
+        {
+          "originalId": "2a823625-b691-4b6a-b508-afc534cc8b94",
+          "type": "flashcards",
+          "variant": "stack",
+          "content": {
+            "cards": [
+              {
+                "id": "card-1",
+                "back": {
+                  "media": {
+                    "url": "media/favicon_scormstack_e5f67093.png",
+                    "type": "image",
+                    "width": 100,
+                    "height": 60,
+                    "caption": "",
+                    "position": "left"
+                  },
+                  "content": "<h4>About scormstack</h4><p>Scormstack gives you freedom to build your own layouts, quizzes, and media-rich courses—and export them in standard SCORM format for any LMS.</p>"
+                },
+                "front": {
+                  "media": {
+                    "url": "media/logo_illustration_finger_75f881b7.png",
+                    "type": "image",
+                    "caption": "",
+                    "position": "full_card"
+                  },
+                  "content": "<p></p>"
+                }
+              },
+              {
+                "id": "card-2",
+                "back": {
+                  "media": {
+                    "url": "media/favicon_scormstack_e5f67093.png",
+                    "type": "image",
+                    "caption": "",
+                    "position": "center",
+                    "verticalAlign": "middle"
+                  },
+                  "content": "<p style=\"text-align: center\">Stack content like slides, blocks, or cards using our drag-and-drop editor.</p>"
+                },
+                "front": {
+                  "media": {
+                    "url": "media/scormstack_blue_8481c9de.png",
+                    "type": "image",
+                    "width": 100,
+                    "height": 100,
+                    "caption": "",
+                    "position": "center",
+                    "verticalAlign": "middle"
+                  },
+                  "content": "<h3 style=\"text-align: center\">Modular course building</h3><p style=\"text-align: center\"></p>"
+                }
+              },
+              {
+                "id": "card-3",
+                "back": {
+                  "media": {
+                    "url": "media/favicon_scormstack_e5f67093.png",
+                    "type": "image",
+                    "caption": "",
+                    "position": "center",
+                    "verticalAlign": "middle"
+                  },
+                  "content": "<p style=\"text-align: center\">Click once to export your course in SCORM 1.2 or 2004 format, ready for upload to any LMS.</p>"
+                },
+                "front": {
+                  "media": {
+                    "url": "media/scormstack_blue_8481c9de.png",
+                    "type": "image",
+                    "width": 100,
+                    "height": 100,
+                    "caption": "",
+                    "position": "center",
+                    "verticalAlign": "middle"
+                  },
+                  "content": "<h3 style=\"text-align: center\">SCORM Export</h3><p style=\"text-align: center\"></p>"
+                }
+              }
+            ],
+            "format": {
+              "gap": 24,
+              "width": 100,
+              "textAlign": "start",
+              "paddingTop": 64,
+              "accentColor": "",
+              "paddingBottom": 64,
+              "paddingLinked": true,
+              "backgroundType": "LIGHT",
+              "backgroundColor": "",
+              "contentMaxWidth": 2
+            },
+            "settings": {
+              "height": "400",
+              "gridColumns": 2,
+              "showFlipHint": true,
+              "flipAnimation": true,
+              "verticalAlign": "middle",
+              "navigationStyle": "dots",
+              "transitionEffect": "cards"
+            }
+          },
+          "custom_layout_id": null,
+          "position": 3,
+          "id": "b3"
+        },
+        {
+          "originalId": "d099f356-5d60-4576-a465-13574d3ee805",
+          "type": "assessment",
+          "variant": "multiple_choice",
+          "content": {
+            "xml": "<problem max_attempts=\"3\" showanswer=\"finished\">\n  <label>What makes a great online course?</label>\n  <description>Choose the best answer based on what you've learned.</description>\n  <multiplechoiceresponse>\n    <choicegroup type=\"MultipleChoice\">\n      <choice correct=\"false\">Lots of text and reading materials\n        <choicehint>While content is important, engagement matters too!</choicehint>\n      </choice>\n      <choice correct=\"true\">Interactive content that engages learners\n        <choicehint>Perfect! Interactive elements like quizzes, flashcards, and multimedia keep learners engaged and improve retention.</choicehint>\n      </choice>\n      <choice correct=\"false\">Complex navigation and many sections\n        <choicehint>Actually, simple and clear navigation helps learners focus on the content.</choicehint>\n      </choice>\n      <choice correct=\"false\">Very long video lectures\n        <choicehint>Shorter, focused content tends to be more effective for online learning.</choicehint>\n      </choice>\n    </choicegroup>\n  </multiplechoiceresponse>\n  <solution>\n    <div class=\"detailed-solution\">\n      <p>Great online courses balance quality content with interactivity. Scormstack helps you create engaging experiences with quizzes, flashcards, interactive images, and more!</p>\n      <p>Remember: Keep content digestible, use visuals, and add interactive elements to maintain engagement.</p>\n    </div>\n  </solution>\n</problem>",
+            "name": "Quick Knowledge Check",
+            "format": {
+              "gap": 24,
+              "width": 100,
+              "textAlign": "start",
+              "textColor": "",
+              "paddingTop": 64,
+              "accentColor": "",
+              "paddingBottom": 64,
+              "paddingLinked": true,
+              "backgroundSize": "cover",
+              "backgroundType": "IMAGE",
+              "backgroundColor": "",
+              "contentMaxWidth": 3,
+              "backgroundEffect": "parallax",
+              "backgroundRepeat": "no-repeat",
+              "backgroundImageAlt": "Aubergine gradient background",
+              "backgroundImageSrc": "media/bg_gradient_2.svg",
+              "backgroundPosition": "center",
+              "baseBackgroundType": "DARK"
+            },
+            "description": "Test your understanding with this sample question.",
+            "display_mode": "stacks",
+            "grade_required": 0.6,
+            "show_navigation": false,
+            "display_intro_page": false,
+            "display_summary_page": true,
+            "show_question_number": true
+          },
+          "custom_layout_id": null,
+          "position": 4,
+          "id": "b4"
+        },
+        {
+          "originalId": "f730d00e-fab9-4c9a-ba70-a2fe4b21d1f2",
+          "type": "image",
+          "variant": "image_with_text",
+          "content": {
+            "text": "<p><span style=\"font-size: 14px\">⭐⭐⭐⭐⭐</span></p><p><span style=\"font-size: 20px\"><em>ScormStack saved us thousands compared to other authoring tools. The interface is intuitive and our team was productive from day one.</em></span></p>",
+            "format": {
+              "gap": 24,
+              "width": 100,
+              "textAlign": "start",
+              "textColor": "white",
+              "paddingTop": 64,
+              "accentColor": "",
+              "paddingBottom": 64,
+              "paddingLinked": true,
+              "backgroundType": "DARK",
+              "contentMaxWidth": 3,
+              "backgroundEffect": "parallax"
+            },
+            "images": {
+              "image_1": {
+                "alt": "media/happy_customers.png",
+                "src": "media/happy_customers.png",
+                "width": 50,
+                "caption": "Add some caption here",
+                "position": "left",
+                "verticalAlign": "middle"
+              }
+            },
+            "options": {
+              "box_shadow": false,
+              "grid_columns": 3,
+              "show_caption": false
+            }
+          },
+          "custom_layout_id": null,
+          "position": 5,
+          "id": "b5"
+        },
+        {
+          "originalId": "776693a5-c14a-4909-9fdc-a1622fac89f6",
+          "type": "navigation_button",
+          "variant": "default",
+          "content": {
+            "icon": "👍",
+            "text": "Complete course",
+            "format": {
+              "gap": 8,
+              "width": 100,
+              "textAlign": "center",
+              "textColor": "var(--background)",
+              "paddingTop": 64,
+              "showLesson": true,
+              "accentColor": "",
+              "paddingBottom": 64,
+              "paddingLinked": true,
+              "backgroundSize": "cover",
+              "backgroundType": "IMAGE",
+              "showObjectives": true,
+              "backgroundColor": "",
+              "contentMaxWidth": 3,
+              "backgroundEffect": "parallax",
+              "backgroundRepeat": "no-repeat",
+              "backgroundImageAlt": "Aubergine gradient background",
+              "backgroundImageSrc": "media/bg_gradient_2_inverted.svg",
+              "backgroundPosition": "top",
+              "baseBackgroundType": "LIGHT",
+              "showTableOfContent": false,
+              "baseBackgroundColor": ""
+            },
+            "settings": {
+              "size": "medium",
+              "width": "auto",
+              "variant": "filled",
+              "alignment": "center"
+            },
+            "actionType": "complete_course",
+            "targetSlide": null,
+            "enablementCondition": "all_previous_blocks"
+          },
+          "custom_layout_id": null,
+          "position": 6,
+          "id": "b6"
+        },
+        {
+          "originalId": "dd5e8fc5-0390-4a5b-bb13-c20b7da4d85c",
+          "type": "video",
+          "variant": "youtube",
+          "content": {
+            "url": "https://youtu.be/dQw4w9WgXcQ?si=-msoQv_8phEAH2pm",
+            "loop": false,
+            "muted": false,
+            "format": {
+              "gap": 24,
+              "width": 100,
+              "textAlign": "start",
+              "paddingTop": 32,
+              "accentColor": "",
+              "paddingBottom": 32,
+              "paddingLinked": true,
+              "backgroundType": "LIGHT",
+              "backgroundColor": "",
+              "contentMaxWidth": 3
+            },
+            "quality": "auto",
+            "autoplay": false,
+            "controls": true,
+            "provider": "youtube",
+            "startTime": 0
+          },
+          "custom_layout_id": null,
+          "position": 7,
+          "id": "b7"
+        },
+        {
+          "originalId": "374a3bb5-97ac-4a47-8963-db138f4f8de1",
+          "type": "assessment",
+          "variant": "multiple_choice",
+          "content": {
+            "name": "Multiple Choice Quiz",
+            "format": {
+              "gap": 24,
+              "width": 100,
+              "textAlign": "start",
+              "paddingTop": 32,
+              "accentColor": "",
+              "paddingBottom": 32,
+              "paddingLinked": true,
+              "backgroundType": "LIGHT",
+              "backgroundColor": "",
+              "contentMaxWidth": 3
+            },
+            "questions": [
+              {
+                "id": "question-1",
+                "type": "MultipleChoice",
+                "title": "<p>What is the primary function of the circulatory system?</p>",
+                "choices": [
+                  {
+                    "id": "choice-1-1",
+                    "hint": "The digestive system is responsible for processing food and nutrients.",
+                    "text": "To digest food and absorb nutrients",
+                    "correct": false
+                  },
+                  {
+                    "id": "choice-1-2",
+                    "hint": "Correct! The circulatory system pumps blood to deliver oxygen and nutrients while removing waste.",
+                    "text": "To transport oxygen, nutrients, and waste products throughout the body",
+                    "correct": true
+                  },
+                  {
+                    "id": "choice-1-3",
+                    "hint": "This describes the function of the urinary system.",
+                    "text": "To filter toxins and produce urine",
+                    "correct": false
+                  },
+                  {
+                    "id": "choice-1-4",
+                    "hint": "This is primarily the function of the endocrine system.",
+                    "text": "To produce hormones and regulate metabolism",
+                    "correct": false
+                  }
+                ],
+                "solution": "<p>The circulatory system, consisting of the heart, blood vessels, and blood, is responsible for transporting essential substances throughout the body.</p><p>It delivers oxygen and nutrients to cells while removing waste products like carbon dioxide.</p>",
+                "description": "Choose the most accurate answer from the options below."
+              }
+            ],
+            "description": "Select the best answer for each question.",
+            "display_mode": "inline",
+            "grade_required": 0.6,
+            "problemSettings": {
+              "showAnswer": "always",
+              "maxAttempts": 3
+            },
+            "show_navigation": false,
+            "grader_assignment": null,
+            "display_intro_page": false,
+            "display_summary_page": false
+          },
+          "custom_layout_id": null,
+          "position": 8,
+          "id": "b8"
+        }
+      ],
+      "variantIndices": null
+    },
+    {
+      "id": "b5f7aa0d-7359-4958-bdb9-06bbc08b7fef",
+      "title": "New Slide",
+      "content": {},
+      "duration": 0,
+      "course_id": "876e160b-0be9-4e0b-a79e-1b466dfa9e85",
+      "created_at": "2026-02-28T14:51:33.992275+00:00",
+      "objectives": [],
+      "section_id": null,
+      "slide_type": "content",
+      "updated_at": "2026-02-28T14:51:33.992275+00:00",
+      "order_index": 1,
+      "variant_ids": null,
+      "blocks": [
+        {
+          "originalId": "45003be4-cc9b-4dbb-8c04-4b5d56f9c297",
+          "type": "image",
+          "variant": "image_with_text",
+          "content": {
+            "text": "<p>Space, the final frontier. These are the voyages of the <code>Starship Enterprise</code>. Its five-year mission: to explore <strong>strange new worlds</strong>, to seek out new life and new civilizations, to boldly go where no man has gone before. 😊 Many say <u>exploration is part of our destiny</u>, but it's actually our duty to future generations and their quest to ensure the survival of the human species. 🐵</p>",
+            "format": {
+              "gap": 24,
+              "width": 100,
+              "textAlign": "start",
+              "paddingTop": 32,
+              "accentColor": "",
+              "paddingBottom": 32,
+              "paddingLinked": true,
+              "backgroundType": "LIGHT",
+              "backgroundColor": "",
+              "contentMaxWidth": 3
+            },
+            "images": {
+              "image_1": {
+                "alt": "media/scormstack_blue.png",
+                "src": "media/image_pic.png",
+                "width": 50,
+                "caption": "Add some caption here",
+                "position": "left",
+                "verticalAlign": "top"
+              }
+            },
+            "options": {
+              "box_shadow": true,
+              "grid_columns": 3,
+              "show_caption": true
+            }
+          },
+          "custom_layout_id": null,
+          "position": 0,
+          "id": "b9"
+        },
+        {
+          "originalId": "74a442ad-019a-4fe5-ac72-7e94f1529ebd",
+          "type": "flashcards",
+          "variant": "stack",
+          "content": {
+            "cards": [
+              {
+                "id": "card-1",
+                "back": {
+                  "content": "<p><strong>Girl with a Pearl Earring</strong><br>Vermeer’s intimate portrait focuses on soft light and a simple pose, turning an ordinary moment into something timeless and enigmatic.</p>",
+                  "tipColor": "dark"
+                },
+                "front": {
+                  "media": {
+                    "url": "media/flash_card_image_default_1.jpg",
+                    "type": "image",
+                    "caption": "",
+                    "position": "full_card"
+                  },
+                  "content": "<h3 style=\"text-align: center\"><span data-text-box=\"\" data-background-color=\"var(--dark)\" data-padding=\"sm\" data-border-radius=\"sm\" class=\"text-box\" style=\"background-color: var(--dark); padding: 0.125em 0.25em; border-radius: 0.25em\"><span style=\"color: var(--gray)\">Johannes Vermeer</span></span></h3>",
+                  "tipColor": "light"
+                }
+              },
+              {
+                "id": "card-2",
+                "back": {
+                  "content": "<p style=\"text-align: center\"><strong>The Creation of Adam (detail)</strong><br>Michelangelo’s iconic fresco shows the near‑touch of hands, a powerful image of life and divine spark at the heart of the Sistine Chapel.</p>",
+                  "tipColor": "dark"
+                },
+                "front": {
+                  "media": {
+                    "url": "media/flash_card_image_default_2.jpg",
+                    "type": "image",
+                    "width": 100,
+                    "height": 100,
+                    "caption": "",
+                    "position": "full_card",
+                    "verticalAlign": "middle"
+                  },
+                  "content": "<h3 style=\"text-align: center\"><span data-text-box=\"\" data-background-color=\"var(--dark)\" data-padding=\"sm\" data-border-radius=\"sm\" class=\"text-box\" style=\"background-color: var(--dark); padding: 0.125em 0.25em; border-radius: 0.25em\"><span style=\"color: var(--gray)\">Michelangelo</span></span></h3>",
+                  "tipColor": "dark"
+                }
+              },
+              {
+                "id": "card-3",
+                "back": {
+                  "content": "<p><strong>The Starry Night</strong><br>Van Gogh’s swirling night sky captures intense emotion and movement, with a quiet village beneath a dramatic, luminous cosmos.</p>",
+                  "tipColor": "dark"
+                },
+                "front": {
+                  "media": {
+                    "url": "media/flash_card_image_default_3.jpg",
+                    "type": "image",
+                    "width": 100,
+                    "height": 100,
+                    "caption": "",
+                    "position": "full_card",
+                    "verticalAlign": "middle"
+                  },
+                  "content": "<h3 style=\"text-align: center\"><span data-text-box=\"\" data-background-color=\"var(--dark)\" data-padding=\"sm\" data-border-radius=\"sm\" class=\"text-box\" style=\"background-color: var(--dark); padding: 0.125em 0.25em; border-radius: 0.25em\"><span style=\"color: var(--gray)\">Vincent van Gogh</span></span></h3>",
+                  "tipColor": "light"
+                }
+              }
+            ],
+            "format": {
+              "gap": 24,
+              "width": 100,
+              "textAlign": "start",
+              "paddingTop": 32,
+              "accentColor": "",
+              "paddingBottom": 32,
+              "paddingLinked": true,
+              "backgroundType": "LIGHT",
+              "backgroundColor": "",
+              "contentMaxWidth": 2
+            },
+            "settings": {
+              "height": "400",
+              "gridColumns": 2,
+              "showFlipHint": true,
+              "flipAnimation": true,
+              "verticalAlign": "middle",
+              "transitionEffect": "cards"
+            }
+          },
+          "custom_layout_id": null,
+          "position": 1,
+          "id": "b10"
+        },
+        {
+          "originalId": "ee63313c-3631-4b9d-b778-678610ad73ac",
+          "type": "flashcards",
+          "variant": "grid",
+          "content": {
+            "cards": [
+              {
+                "id": "card-1",
+                "back": {
+                  "content": "<p><strong>Girl with a Pearl Earring</strong><br>Vermeer’s intimate portrait focuses on soft light and a simple pose, turning an ordinary moment into something timeless and enigmatic.</p>",
+                  "tipColor": "dark"
+                },
+                "front": {
+                  "media": {
+                    "url": "media/flash_card_image_default_1.jpg",
+                    "type": "image",
+                    "caption": "",
+                    "position": "full_card"
+                  },
+                  "content": "<h3 style=\"text-align: center\"><span data-text-box=\"\" data-background-color=\"var(--dark)\" data-padding=\"sm\" data-border-radius=\"sm\" class=\"text-box\" style=\"background-color: var(--dark); padding: 0.125em 0.25em; border-radius: 0.25em\"><span style=\"color: var(--gray)\">Johannes Vermeer</span></span></h3>",
+                  "tipColor": "light"
+                }
+              },
+              {
+                "id": "card-2",
+                "back": {
+                  "content": "<p style=\"text-align: center\"><strong>The Creation of Adam (detail)</strong><br>Michelangelo’s iconic fresco shows the near‑touch of hands, a powerful image of life and divine spark at the heart of the Sistine Chapel.</p>",
+                  "tipColor": "dark"
+                },
+                "front": {
+                  "media": {
+                    "url": "media/flash_card_image_default_2.jpg",
+                    "type": "image",
+                    "width": 100,
+                    "height": 100,
+                    "caption": "",
+                    "position": "full_card",
+                    "verticalAlign": "middle"
+                  },
+                  "content": "<h3 style=\"text-align: center\"><span data-text-box=\"\" data-background-color=\"var(--dark)\" data-padding=\"sm\" data-border-radius=\"sm\" class=\"text-box\" style=\"background-color: var(--dark); padding: 0.125em 0.25em; border-radius: 0.25em\"><span style=\"color: var(--gray)\">Michelangelo</span></span></h3>",
+                  "tipColor": "dark"
+                }
+              },
+              {
+                "id": "card-3",
+                "back": {
+                  "content": "<p><strong>The Starry Night</strong><br>Van Gogh’s swirling night sky captures intense emotion and movement, with a quiet village beneath a dramatic, luminous cosmos.</p>",
+                  "tipColor": "dark"
+                },
+                "front": {
+                  "media": {
+                    "url": "media/flash_card_image_default_3.jpg",
+                    "type": "image",
+                    "width": 100,
+                    "height": 100,
+                    "caption": "",
+                    "position": "full_card",
+                    "verticalAlign": "middle"
+                  },
+                  "content": "<h3 style=\"text-align: center\"><span data-text-box=\"\" data-background-color=\"var(--dark)\" data-padding=\"sm\" data-border-radius=\"sm\" class=\"text-box\" style=\"background-color: var(--dark); padding: 0.125em 0.25em; border-radius: 0.25em\"><span style=\"color: var(--gray)\">Vincent van Gogh</span></span></h3>",
+                  "tipColor": "light"
+                }
+              }
+            ],
+            "format": {
+              "gap": 24,
+              "width": 100,
+              "textAlign": "start",
+              "paddingTop": 32,
+              "accentColor": "",
+              "paddingBottom": 32,
+              "paddingLinked": true,
+              "backgroundType": "LIGHT",
+              "backgroundColor": "",
+              "contentMaxWidth": 3
+            },
+            "settings": {
+              "height": "250",
+              "gridColumns": 2,
+              "showFlipHint": true,
+              "flipAnimation": true,
+              "verticalAlign": "middle",
+              "navigationStyle": "dots",
+              "showStepNumbers": false,
+              "transitionEffect": "cards"
+            }
+          },
+          "custom_layout_id": null,
+          "position": 2,
+          "id": "b11"
+        },
+        {
+          "originalId": "d4cb8183-7be1-4d0e-8be9-ed1025e0aa9e",
+          "type": "web_simulation",
+          "variant": "default",
+          "content": {
+            "steps": [
+              {
+                "id": "step-1",
+                "areas": [
+                  {
+                    "id": "area-1763115619971-c87rqvcwf",
+                    "label": "This is the Publish button, click on it to view Publishing options.",
+                    "topPercent": 1.5065921749459221,
+                    "leftPercent": 94.64713965059613,
+                    "rightPercent": 99.22656640734867,
+                    "targetStepId": "step-1763116021631",
+                    "bottomPercent": 6.284597343263095
+                  }
+                ],
+                "title": "Step 1",
+                "isEndStep": false,
+                "backgroundImage": {
+                  "alt": "media/step1_opt.png",
+                  "src": "media/step1_opt_d633f143.png"
+                }
+              },
+              {
+                "id": "step-1763116021631",
+                "areas": [
+                  {
+                    "id": "area-1763116044766-wu9njpbnw",
+                    "label": "Choose Embed and Share options",
+                    "topPercent": 17.634441615936115,
+                    "leftPercent": 82.67303993829037,
+                    "rightPercent": 99.41126419839875,
+                    "targetStepId": "step-1763116070878",
+                    "bottomPercent": 22.8569651721407
+                  }
+                ],
+                "title": "Step 2",
+                "isEndStep": false,
+                "backgroundImage": {
+                  "alt": "media/step2_opt.png",
+                  "src": "media/step2_opt_00772e29.png"
+                }
+              },
+              {
+                "id": "step-1763116070878",
+                "areas": [
+                  {
+                    "id": "area-1763116089947-kk15lasrb",
+                    "label": "Select the Share on Linkedin method",
+                    "topPercent": 53.46806439275408,
+                    "leftPercent": 83.02463989625306,
+                    "rightPercent": 98.10291325089158,
+                    "targetStepId": "step-1763116103160",
+                    "bottomPercent": 62.69601196064115
+                  }
+                ],
+                "title": "Step 3",
+                "isEndStep": false,
+                "backgroundImage": {
+                  "alt": "media/step3_opt.png",
+                  "src": "media/step3_opt_cd1e0fae.png"
+                }
+              },
+              {
+                "id": "step-1763116103160",
+                "areas": [],
+                "title": "Step 4",
+                "isEndStep": true,
+                "backgroundImage": {
+                  "alt": "media/step4_opt.png",
+                  "src": "media/step4_opt_87cad6ff.png"
+                }
+              }
+            ],
+            "format": {
+              "gap": 24,
+              "width": 100,
+              "textAlign": "start",
+              "paddingTop": 32,
+              "accentColor": "",
+              "paddingBottom": 32,
+              "paddingLinked": true,
+              "backgroundType": "LIGHT",
+              "backgroundColor": "",
+              "contentMaxWidth": 4
+            },
+            "settings": {
+              "areaColor": "var(--background)",
+              "deviceType": "desktop",
+              "showBrowser": true,
+              "showProgress": true,
+              "showClickableAreas": true
+            },
+            "startText": "<h4>Welcome to this Web Simulation block !</h4><p>With this block, you can guided users with walkthrough in your app.</p><p></p><p><strong><u>Example: </u></strong></p><p>Use the simulation to find out how to publish a course on Linkedin </p>",
+            "finishText": "<h4>🎉 Well done!</h4><p>You now know how to publish a course on Linkedin in a few clicks !</p>"
+          },
+          "custom_layout_id": null,
+          "position": 3,
+          "id": "b12"
+        },
+        {
+          "originalId": "b5f2f10c-64c3-46be-9b08-67e28d401cd6",
+          "type": "categorization",
+          "variant": "drag_drop",
+          "content": {
+            "items": [
+              {
+                "id": "item-1",
+                "alt": "",
+                "type": "text",
+                "textContent": "<p>Variables</p>",
+                "imageContent": ""
+              },
+              {
+                "id": "item-2",
+                "alt": "",
+                "type": "text",
+                "textContent": "<p>Design Patterns</p>",
+                "imageContent": ""
+              },
+              {
+                "id": "item-3",
+                "alt": "",
+                "type": "text",
+                "textContent": "<p>Loops</p>",
+                "imageContent": ""
+              },
+              {
+                "id": "item-4",
+                "alt": "",
+                "type": "text",
+                "textContent": "<p>Recursion</p>",
+                "imageContent": ""
+              }
+            ],
+            "title": "Sort into Categories",
+            "format": {
+              "gap": 24,
+              "width": 100,
+              "textAlign": "start",
+              "paddingTop": 32,
+              "accentColor": "",
+              "paddingBottom": 32,
+              "paddingLinked": true,
+              "backgroundType": "LIGHT",
+              "backgroundColor": "",
+              "contentMaxWidth": 3
+            },
+            "grading": {
+              "weight": 1,
+              "showAnswer": "always",
+              "maxAttempts": 3,
+              "partialCredit": true
+            },
+            "settings": {
+              "shuffleItems": true,
+              "itemDisplayStyle": "pills",
+              "showInstructions": true,
+              "immediateFeedback": true,
+              "shuffleCategories": false
+            },
+            "solution": "",
+            "categories": [
+              {
+                "id": "cat-1",
+                "name": "Beginner",
+                "description": "Entry-level concepts"
+              },
+              {
+                "id": "cat-2",
+                "name": "Intermediate",
+                "description": "Building on basics"
+              },
+              {
+                "id": "cat-3",
+                "name": "Advanced",
+                "description": "Expert-level topics"
+              }
+            ],
+            "instructions": "Drag each item into the appropriate category.",
+            "correctAssignments": [
+              {
+                "itemId": "item-1",
+                "categoryId": "cat-1",
+                "explanation": ""
+              },
+              {
+                "itemId": "item-2",
+                "categoryId": "cat-3",
+                "explanation": ""
+              },
+              {
+                "itemId": "item-3",
+                "categoryId": "cat-1",
+                "explanation": ""
+              },
+              {
+                "itemId": "item-4",
+                "categoryId": "cat-2",
+                "explanation": ""
+              }
+            ]
+          },
+          "custom_layout_id": null,
+          "position": 4,
+          "id": "b13"
+        },
+        {
+          "originalId": "3e293b99-781b-4362-9892-653abf764956",
+          "type": "fill_in_blank",
+          "variant": "default",
+          "content": {
+            "title": "Complete the passage",
+            "blanks": [
+              {
+                "id": "blank-0",
+                "type": "text",
+                "caseSensitive": false,
+                "correctAnswers": [
+                  "persistence",
+                  "perseverance"
+                ]
+              },
+              {
+                "id": "blank-1",
+                "type": "list",
+                "options": [
+                  "quality",
+                  "quantity",
+                  "creativity"
+                ],
+                "correctAnswers": [
+                  "quality"
+                ]
+              }
+            ],
+            "format": {
+              "gap": 24,
+              "width": 100,
+              "textAlign": "start",
+              "paddingTop": 32,
+              "accentColor": "",
+              "paddingBottom": 32,
+              "paddingLinked": true,
+              "backgroundType": "LIGHT",
+              "backgroundColor": "",
+              "contentMaxWidth": 3
+            },
+            "grading": {
+              "weight": 1,
+              "showAnswer": "always",
+              "maxAttempts": 3,
+              "caseSensitive": false,
+              "partialCredit": true
+            },
+            "passage": "The two secrets of success are {text:persistence,perseverance} and {list:(quality),quantity,creativity}.",
+            "settings": {
+              "showProgress": true,
+              "showInstructions": true
+            },
+            "solution": "Success requires both persistence (the ability to keep going despite setbacks) and quality (doing excellent work).",
+            "instructions": "Fill in the blanks to complete the text below."
+          },
+          "custom_layout_id": null,
+          "position": 5,
+          "id": "b14"
+        },
+        {
+          "originalId": "b50fd803-e8e1-4faf-9afa-344e6a100a23",
+          "type": "click_on_image",
+          "variant": "default",
+          "content": {
+            "title": "Click on Image Assessment",
+            "format": {
+              "gap": 24,
+              "width": 100,
+              "textAlign": "start",
+              "paddingTop": 32,
+              "accentColor": "",
+              "paddingBottom": 32,
+              "paddingLinked": true,
+              "backgroundType": "LIGHT",
+              "backgroundColor": "",
+              "contentMaxWidth": 3
+            },
+            "grading": {
+              "weight": 1,
+              "showAnswer": "always",
+              "maxAttempts": 3,
+              "partialCredit": false
+            },
+            "hotspots": [
+              {
+                "id": "hotspot-1",
+                "name": "Correct Area",
+                "feedback": "Correct! You identified the right area.",
+                "isCorrect": true,
+                "topPercent": 19.332568850105343,
+                "leftPercent": 57.01039497809131,
+                "rightPercent": 64.33284647337291,
+                "bottomPercent": 32.16050418601182
+              }
+            ],
+            "imageAlt": "Sample image for click-on-image assessment",
+            "imageUrl": "media/image_pic.png",
+            "settings": {
+              "maxUserAreas": 1,
+              "showInstructions": true,
+              "highlightCorrectOnComplete": true
+            },
+            "solution": "<p>This is a sample click-on-image assessment. Replace with your own image and define appropriate hotspot areas.</p>",
+            "instructions": "<p>Click on the white circle on the image below.</p>"
+          },
+          "custom_layout_id": null,
+          "position": 6,
+          "id": "b15"
+        }
+      ],
+      "variantIndices": null
+    }
+  ],
+  "sections": [],
+  "variants": [],
+  "checkpoints": [],
+  "linearOrder": [
+    {
+      "type": "slide",
+      "linearIndex": 0,
+      "id": "ad6654a6-7aee-4964-88d9-50b4582acbca",
+      "sectionId": null,
+      "variantIndices": null
+    },
+    {
+      "type": "slide",
+      "linearIndex": 1,
+      "id": "b5f7aa0d-7359-4958-bdb9-06bbc08b7fef",
+      "sectionId": null,
+      "variantIndices": null
+    }
+  ],
+  "totalAssessments": 5,
+  "assessmentIds": [
+    "b4",
+    "b8",
+    "b13",
+    "b14",
+    "b15"
+  ],
+  "settings": {
+    "grading_policy": {
+      "GRADER": [],
+      "enabled": false,
+      "GRADE_CUTOFFS": {
+        "Pass": 0.6
+      },
+      "completionMode": "both",
+      "completionThreshold": 100,
+      "completion_requirements": {
+        "require_all_graders": true,
+        "require_minimum_counts": true
+      }
+    },
+    "scorm": {
+      "enableDebugging": false
+    }
+  },
+  "gradingData": {
+    "policy": {
+      "GRADER": [],
+      "enabled": false,
+      "GRADE_CUTOFFS": {
+        "Pass": 0.6
+      },
+      "completionMode": "both",
+      "completionThreshold": 100,
+      "completion_requirements": {
+        "require_all_graders": true,
+        "require_minimum_counts": true
+      }
+    },
+    "enabled": false,
+    "graders": [],
+    "gradeCutoffs": {
+      "Pass": 0.6
+    },
+    "metadata": {
+      "hasGradingPolicy": false,
+      "totalGraders": 0,
+      "graderTypes": [],
+      "exportedAt": "2026-02-28T14:56:27.451Z"
+    }
+  },
+  "assessmentMapping": {
+    "b4": {
+      "individualWeight": 1,
+      "assessmentInfo": {
+        "name": "Quick Knowledge Check",
+        "description": "Test your understanding with this sample question.",
+        "gradeRequired": 0.6
+      },
+      "isSimpleWeight": true
+    },
+    "b8": {
+      "individualWeight": 1,
+      "assessmentInfo": {
+        "name": "Multiple Choice Quiz",
+        "description": "Select the best answer for each question.",
+        "gradeRequired": 0.6
+      },
+      "isSimpleWeight": true
+    },
+    "b13": {
+      "individualWeight": 1,
+      "assessmentInfo": {
+        "name": "Sort into Categories",
+        "description": "",
+        "gradeRequired": 0.5
+      },
+      "isSimpleWeight": true
+    },
+    "b14": {
+      "individualWeight": 1,
+      "assessmentInfo": {
+        "name": "Complete the passage",
+        "description": "",
+        "gradeRequired": 0.5
+      },
+      "isSimpleWeight": true
+    },
+    "b15": {
+      "individualWeight": 1,
+      "assessmentInfo": {
+        "name": "Click on Image Assessment",
+        "description": "",
+        "gradeRequired": 0.5
+      },
+      "isSimpleWeight": true
+    }
+  }
+};
+console.log("Course data loaded: English test (2 slides)");
+      
+// System labels for translation injected during build
+window.__UI_LABELS__ = {
+  "assessment.submit": "Submit",
+  "assessment.try_again": "Try again",
+  "assessment.next_question": "Next question",
+  "assessment.previous": "Previous",
+  "assessment.view_results": "View results",
+  "assessment.start_assessment": "Start assessment",
+  "assessment.assessment_results": "Assessment results",
+  "assessment.assessment_passed": "Assessment passed",
+  "assessment.assessment_not_passed": "Assessment not passed",
+  "assessment.review_questions": "Review questions",
+  "assessment.continue_assessment": "Continue assessment",
+  "assessment.complete_assessment": "Complete assessment",
+  "assessment.correct": "Correct",
+  "assessment.incorrect": "Incorrect",
+  "assessment.partially_correct": "Partially correct",
+  "assessment.correct_answer": "Correct answer",
+  "assessment.questions": "Questions",
+  "assessment.question": "Question",
+  "assessment.of": "of",
+  "assessment.points_possible": "Points possible",
+  "assessment.overview": "Overview",
+  "assessment.results": "Results",
+  "assessment.attempts": "Attempts",
+  "assessment.attempts_per_question": "Maximum attempts per question is",
+  "assessment.unlimited_attempts": "You have unlimited attempts to answer this assessment",
+  "assessment.progress": "Progress",
+  "assessment.total_points_possible": "The total points possible are",
+  "assessment.total_point_possible": "The total point possible is",
+  "assessment.required": "Required",
+  "assessment.attempts_available": "attempts available",
+  "assessment.fill_in_blank.choose": "Choose...",
+  "assessment.fill_in_blank.type_here": "Type here...",
+  "assessment.string.type_here": "Type here...",
+  "assessment.case_sensitive": "Case sensitive",
+  "assessment.case_insensitive": "Case insensitive",
+  "assessment.blanks": "blanks",
+  "assessment.success_meter.extra_question": "Extra question",
+  "assessment.success_meter.points": "Points",
+  "assessment.success_meter.continue_with_extra_questions": "Continue with extra questions",
+  "assessment.success_meter.performance_level": "Level",
+  "assessment.numerical.type_here": "Type here...",
+  "assessment.numerical.tolerance": "Tolerance",
+  "assessment.enter_response": "Enter your response here...",
+  "assessment.response_saved": "Response saved",
+  "assessment.edit_response": "Edit Response",
+  "assessment.explanation": "Explanation",
+  "assessment.score": "Score",
+  "assessment.keywords_matched": "keywords matched",
+  "assessment.success_meter.checkpoint_reached": "Checkpoint reached!",
+  "assessment.success_meter.you_need": "You need",
+  "assessment.success_meter.to_complete_the_assessment": "to complete the assessment",
+  "assessment.success_meter.lets_try_a_few_more_questions_to_boost_your_score": "Let's try a few more questions to boost your score!",
+  "assessment.success_meter.maximum_attempts_reached": "Maximum attempts reached",
+  "navigation.back": "Back",
+  "navigation.next": "Next",
+  "navigation.continue": "Continue",
+  "navigation.finish": "Finish",
+  "navigation.previous": "Previous",
+  "navigation.go_to_page": "Go to page {page}",
+  "navigation.go_to_card": "Go to card {card}",
+  "navigation.completed": "Completed",
+  "navigation.of": "of",
+  "navigation.current_page": "Current page",
+  "resume.welcome_back": "Welcome back!",
+  "resume.last_on": "You were last on",
+  "resume.slide": "Slide",
+  "resume.of": "of",
+  "resume.resume_course": "Resume Course",
+  "resume.start_over": "Start Over",
+  "resume.progress_saved": "Your progress has been saved automatically",
+  "resume.loading_course": "Loading course...",
+  "resume.please_wait": "Please wait while we prepare your learning experience.",
+  "general.loading": "Loading...",
+  "general.save": "Save",
+  "general.cancel": "Cancel",
+  "general.close": "Close",
+  "general.error": "Error",
+  "general.retry": "Retry",
+  "general.download": "Download",
+  "tabs.more": "more",
+  "flashcard.click_to_flip": "Click to flip",
+  "flashcard.click_to_flip_back": "Click to flip back",
+  "flashcard.card_number": "Card",
+  "flashcard.no_flashcards": "No flashcards available",
+  "flashcard.card": "Flashcard",
+  "flashcard.showing_front": "Showing front side",
+  "flashcard.showing_back": "Showing back side",
+  "flashcard.press_to_flip": "Press Enter or Space to flip",
+  "pdf.upload_a_pdf_document_to_display_here": "Upload a PDF document to display here",
+  "pdf.no_pdf_selected": "No PDF selected",
+  "interactive_image.hotspot": "Hotspot",
+  "interactive_image.press_to_view": "Press Enter or Space to view details",
+  "interactive_image.click_to_view": "Click to view content",
+  "interactive_image.close_tooltip": "Close tooltip",
+  "interactive_image.close_sidebar": "Close sidebar",
+  "interactive_image.close_modal": "Close modal",
+  "interactive_image.press_escape_close": "Press Escape to close",
+  "audio.show_transcript": "Show Transcript",
+  "continue.button_text": "Button Text",
+  "continue.auto_progress": "Auto progress after delay",
+  "continue.continue": "Continue",
+  "slide_intro.untitled_lesson": "Untitled Lesson",
+  "slide_intro.learning_objectives": "Learning Objectives",
+  "slide_intro.lesson": "Lesson",
+  "slide_intro.of": "of",
+  "slide_intro.table_of_contents": "Table of contents",
+  "slide_intro.minute": "minute",
+  "slide_intro.minutes": "minutes",
+  "flow.step": "Step",
+  "flow.of": "of",
+  "video.play": "Play",
+  "video.pause": "Pause",
+  "video.loading": "Loading video...",
+  "video.error": "Error loading video",
+  "accordion.expand": "Expand",
+  "accordion.collapse": "Collapse",
+  "separator.section_break": "Section break",
+  "media.alt_text": "Image description",
+  "media.caption": "Caption",
+  "media.loading": "Loading media...",
+  "media.error": "Failed to load media",
+  "click_on_image.click_to_place_areas": "Click to place areas",
+  "click_on_image.click_to_place_areas_up_to_start": " (up to ",
+  "click_on_image.click_to_place_areas_up_to_end": ").",
+  "click_on_image.click_to_place_areas_to_remove": " Click on placed areas to remove them",
+  "click_on_image.click_to_place_area": "Click to place an area",
+  "click_on_image.click_to_place_area_to_remove": "Click on placed area to remove it",
+  "web_simulation.start": "Start",
+  "web_simulation.restart": "Restart",
+  "web_simulation.loading": "Loading simulation...",
+  "web_simulation.failed_to_load_image": "Failed to load image",
+  "web_simulation.no_image_configured": "No image configured for this step",
+  "web_simulation.navigate_to": "Navigate to",
+  "web_simulation.area": "area",
+  "web_simulation.step": "Step",
+  "web_simulation.of": "of",
+  "web_simulation.progress": "Progress",
+  "web_simulation.click_on_image": "Click on image",
+  "categorization.item": "Item",
+  "categorization.drop_here": "Drop items here",
+  "matching.pairedItems": "Paired Items",
+  "matching.pairedItemsAriaLabel": "Paired items. Press Space or Enter to unpair.",
+  "access.password_required": "Password Required",
+  "access.password_description": "This course is password protected. Please enter the password to access the content.",
+  "access.enter_password": "Enter password",
+  "access.incorrect_password": "Incorrect password. Please try again.",
+  "access.password_not_configured": "Password verification not configured properly.",
+  "access.unable_to_verify": "Unable to verify password. Please try again.",
+  "access.contact_provider": "Contact the course provider if you need the password.",
+  "access.verifying": "Verifying...",
+  "access.continue": "Continue",
+  "access.enter_email": "Enter Your Email",
+  "access.enter_email_placeholder": "your@email.com",
+  "access.enter_email_description": "We use your email to identify yourself",
+  "access.choose_nickname": "Choose a Nickname",
+  "access.nickname_placeholder": "e.g., BluePhoenix42",
+  "access.nickname_description": "Pick a nickname to identify yourself",
+  "access.enter_name": "Enter Your Name",
+  "access.name_placeholder": "e.g., John Doe",
+  "access.name_description": "Enter your name to identify yourself",
+  "access.field_required": "This field is required",
+  "access.invalid_email": "Please enter a valid email address",
+  "access.min_length": "Must be at least 2 characters",
+  "access.max_length": "Must be 100 characters or less",
+  "access.saving": "Saving...",
+  "access.saved": "Saved!",
+  "access.progress_tracked": "Your progress will be tracked",
+  "access.failed_to_save": "Failed to save. Please try again.",
+  "completion.passed_title": "Congratulations! You passed!",
+  "completion.passed_description": "You have successfully completed this course and achieved a passing score.",
+  "completion.completed_title": "Course Completed",
+  "completion.completed_description": "You have successfully completed this course. Well done!",
+  "completion.failed_title": "Course Completed",
+  "completion.failed_description": "You have completed this course. You may want to review the material and try again to achieve a passing score.",
+  "completion.score": "Score",
+  "completion.your_score": "Your Score",
+  "completion.continue_reviewing": "Continue Reviewing",
+  "completion.exit_course": "Exit Course",
+  "completion.debug_info": "Debug Info",
+  "completion.scorm_version": "SCORM Version",
+  "completion.status": "Status",
+  "completion.passing": "Passing",
+  "completion.na": "N/A"
+};
+console.log("System labels loaded: 183 translations");
+        
+// Current locale injected during build
+window.__CURRENT_LOCALE__ = "en";
+console.log("Current locale set to: en");
+      
+// Text direction injected during build
+window.__TEXT_DIRECTION__ = "ltr";
+document.documentElement.setAttribute('dir', "ltr");
+console.log("Text direction set to: ltr");
+      
+// Custom layouts injected during build
+window.__CUSTOM_LAYOUTS__ = {};
+console.log("Custom layouts loaded: 0 layouts");
+      
+// Branding flag injected during build (SCORM packages)
+window.__SHOW_BRANDING__ = true;
+console.log("Branding flag set to: true");
+      </script>
+    <script type="module" crossorigin src="./assets/index.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/vendor.js" />
+    <link rel="stylesheet" href="./assets/index.css" />
+    <style id="theme-styles">
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Raleway:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap');
+
+:root {
+  --dark-color: oklch(0.12 0.03 312);
+  --dark: oklch(0.12 0.03 312);
+  --gray-color: oklch(0.9591 0.0123 317.74);
+  --gray: oklch(0.9591 0.0123 317.74);
+  --accent-color: oklch(0.9159 0.0467 359.66);
+  --accent: oklch(0.9159 0.0467 359.66);
+  --danger-color: oklch(0.65 0.24 25);
+  --danger: oklch(0.65 0.24 25);
+  --primary-color: oklch(0.50 0.16 333);
+  --primary: oklch(0.50 0.16 333);
+  --success-color: oklch(0.70 0.20 145);
+  --success: oklch(0.70 0.20 145);
+  --warning-color: oklch(0.75 0.15 85);
+  --warning: oklch(0.75 0.15 85);
+  --background-color: oklch(1 0 0);
+  --background: oklch(1 0 0);
+  --foreground-color: oklch(0.12 0.03 312);
+  --foreground: oklch(0.12 0.03 312);
+  --primary-foreground: white;
+  --gray-foreground: oklch(0.12 0.03 312);
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-heading: "Raleway", system-ui, sans-serif;
+  --radius: 0.625rem;
+  --heading-weight: 700;
+}
+
+.font-heading { font-family: var(--font-heading); }
+.font-body { font-family: var(--font-body); }
+
+/* Override heading weight */
+h1, h2, h3, h4, h5, h6 { font-weight: var(--heading-weight) !important; }
+</style>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

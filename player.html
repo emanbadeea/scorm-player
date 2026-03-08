@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Course Player</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet"/>
+  
+  <style>
+    :root {
+      --bg:      #080810;
+      --surface: #0f0f1c;
+      --border:  #1e1e35;
+      --accent:  #5b4fff;
+      --text:    #e8e8f0;
+      --muted:   #6b6b8a;
+    }
+
+    * { margin:0; padding:0; box-sizing:border-box; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── top bar ── */
+    .topbar {
+      flex-shrink: 0;
+      height: 52px;
+      padding: 0 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .back-btn {
+      display: flex; align-items: center; gap: 6px;
+      text-decoration: none;
+      color: var(--muted);
+      font-size: 13px;
+      transition: color .2s;
+      flex-shrink: 0;
+    }
+    .back-btn:hover { color: var(--text); }
+
+    .divider {
+      width: 1px; height: 20px;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+
+    .course-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .badges { display:flex; gap:8px; flex-shrink:0; }
+
+    .badge {
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+
+    .badge strong { color: var(--text); margin-left: 4px; }
+
+    #status-badge.completed { border-color:#22c55e; }
+    #status-badge.completed strong { color:#4ade80; }
+    #status-badge.failed    { border-color:#ef4444; }
+    #status-badge.failed    strong { color:#f87171; }
+
+    /* ── iframe ── */
+    #scorm-frame {
+      flex: 1;
+      width: 100%;
+      border: none;
+      background: #fff;
+    }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <a class="back-btn" href="index.html">← Back</a>
+  <div class="divider"></div>
+  <div class="course-title" id="course-title">Loading…</div>
+  <div class="badges">
+    <div class="badge" id="score-badge">Score: <strong id="score">–</strong></div>
+    <div class="badge" id="status-badge">Status: <strong id="status">–</strong></div>
+  </div>
+</div>
+
+<iframe id="scorm-frame" src=""></iframe>
+
+
+<script src="scorm-api.js"></script>
+  <script src="player.js"></script>
+</body>
+</html>
