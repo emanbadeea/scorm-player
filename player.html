@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Course Player</title>
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet"/>
-  
   <style>
     :root {
       --bg:      #080810;
@@ -27,7 +26,6 @@
       flex-direction: column;
     }
 
-    /* ── top bar ── */
     .topbar {
       flex-shrink: 0;
       height: 52px;
@@ -49,11 +47,7 @@
     }
     .back-btn:hover { color: var(--text); }
 
-    .divider {
-      width: 1px; height: 20px;
-      background: var(--border);
-      flex-shrink: 0;
-    }
+    .divider { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
 
     .course-title {
       font-family: 'Syne', sans-serif;
@@ -83,7 +77,6 @@
     #status-badge.failed    { border-color:#ef4444; }
     #status-badge.failed    strong { color:#f87171; }
 
-    /* ── iframe ── */
     #scorm-frame {
       flex: 1;
       width: 100%;
@@ -106,8 +99,7 @@
 
 <iframe id="scorm-frame" src=""></iframe>
 
-
 <script src="scorm-api.js"></script>
-  <script src="player.js"></script>
+<script src="player.js"></script>
 </body>
-</html>
+</html>س
