@@ -13,7 +13,7 @@ const courses = [
     color:    "linear-gradient(135deg,#1a1a3e,#2d1b69)",
     path:     "courses/english-test/index.html",
   },
-  // ── add new course here ──
+
   // {
   //   id:       "course-id",
   //   title:    "Course Name",
@@ -64,5 +64,4 @@ if (courses.length === 0) {
 const cats = [...new Set(courses.map(c => c.category))].length;
 document.getElementById("stat-total").textContent   = courses.length;
 document.getElementById("stat-cats").textContent    = cats;
-
 document.getElementById("course-count").textContent = `${courses.length} course${courses.length !== 1 ? "s" : ""} available`;
